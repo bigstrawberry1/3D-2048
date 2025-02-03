@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>3D 2048</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+        }
+        canvas {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+        #score {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            color: #333;
+            font-size: 24px;
+            font-family: Arial;
+            background: rgba(255,255,255,0.8);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        #instructions {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: #333;
+            font-size: 16px;
+            font-family: Arial;
+            background: rgba(255,255,255,0.8);
+            padding: 15px;
+            border-radius: 5px;
+            line-height: 1.5;
+        }
+        #gameOverModal {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+            text-align: center;
+            z-index: 1000;
+        }
+        
+        #gameOverModal h2 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        
+        #gameOverModal button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 15px;
+        }
+        
+        #gameOverModal button:hover {
+            background: #45a049;
+        }
+        
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+        }
+        
+        #controls {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            gap: 10px;
+            z-index: 1000;
+        }
+        
+        .control-button {
+            background: rgba(255, 255, 255, 0.9);
+            border: 2px solid #4CAF50;
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            color: #333;
+            transition: all 0.3s;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        
+        .control-button:hover {
+            background: rgba(255, 255, 255, 1);
+            transform: translateY(-2px);
+        }
+        
+        .control-button.active {
+            background: #4CAF50;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div id="score">分数: 0</div>
+    <div id="instructions">
+        操作说明：<br>
+        ↑ 或 W：向上移动<br>
+        ↓ 或 S：向下移动<br>
+        ← 或 A：向左移动<br>
+        → 或 D：向右移动<br>
+        Z：向前移动<br>
+        X：向后移动<br>
+        R：重新开始游戏<br>
+        <br>
+        视角控制：<br>
+        鼠标拖拽：旋转视角<br>
+        鼠标滚轮：缩放视角<br>
+        <br>
+        <span style="color: #c60000;">※ 红色箭头指向玩家时为正面</span>
+    </div>
+    
+    <div id="controls">
+        <button class="control-button" id="pauseButton">⏸️ 暂停</button>
+        <button class="control-button" id="musicButton">🎵 音乐开</button>
+    </div>
+    
+    <div class="modal-overlay" id="modalOverlay"></div>
+    <div id="gameOverModal">
+        <h2>游戏结束！</h2>
+        <p>你的最终得分是：<span id="finalScore">0</span></p>
+        <button id="restartButton">重新开始</button>
+    </div>
+    
+    <canvas id="gameCanvas"></canvas>
+    <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.157.0/build/three.module.js"
+        }
+    }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+
+        class OrbitControls {
+            constructor(camera, domElement) {
+                this.camera = camera;
+                this.domElement = domElement;
+                this.target = new THREE.Vector3();
+                this.enabled = true;
+                this.enableDamping = true;
+                this.dampingFactor = 0.05;
+                
+                this.rotateSpeed = 1.0;
+                this.zoomSpeed = 1.0;
+                
+                this.mouseButtons = { LEFT: 0, MIDDLE: 1, RIGHT: 2 };
+                
+                this.rotateStart = new THREE.Vector2();
+                this.rotateEnd = new THREE.Vector2();
+                this.rotateDelta = new THREE.Vector2();
+                
+                this.spherical = new THREE.Spherical();
+                this.sphericalDelta = new THREE.Spherical();
+                
+                this.domElement.addEventListener('mousedown', this.onMouseDown.bind(this));
+                this.domElement.addEventListener('wheel', this.onMouseWheel.bind(this));
+            }
+            
+            onMouseDown(event) {
+                if (!this.enabled) return;
+                
+                event.preventDefault();
+                
+                if (event.button === this.mouseButtons.LEFT) {
+                    this.rotateStart.set(event.clientX, event.clientY);
+                    document.addEventListener('mousemove', this.onMouseMove.bind(this));
+                    document.addEventListener('mouseup', this.onMouseUp.bind(this));
+                }
+            }
+            
+            onMouseMove(event) {
+                this.rotateEnd.set(event.clientX, event.clientY);
+                this.rotateDelta.subVectors(this.rotateEnd, this.rotateStart);
+                
+                const element = this.domElement;
+                
+                this.sphericalDelta.theta -= 2 * Math.PI * this.rotateDelta.x / element.clientWidth * this.rotateSpeed;
+                this.sphericalDelta.phi -= 2 * Math.PI * this.rotateDelta.y / element.clientHeight * this.rotateSpeed;
+                
+                this.rotateStart.copy(this.rotateEnd);
+                this.update();
+            }
+            
+            onMouseUp() {
+                document.removeEventListener('mousemove', this.onMouseMove.bind(this));
+                document.removeEventListener('mouseup', this.onMouseUp.bind(this));
+            }
+            
+            onMouseWheel(event) {
+                if (!this.enabled) return;
+                
+                event.preventDefault();
+                
+                if (event.deltaY < 0) {
+                    this.dollyIn();
+                } else {
+                    this.dollyOut();
+                }
+                
+                this.update();
+            }
+            
+            dollyIn() {
+                this.camera.position.multiplyScalar(0.95);
+            }
+            
+            dollyOut() {
+                this.camera.position.multiplyScalar(1.05);
+            }
+            
+            update() {
+                const offset = new THREE.Vector3();
+                offset.copy(this.camera.position).sub(this.target);
+                
+                this.spherical.setFromVector3(offset);
+                
+                this.spherical.theta += this.sphericalDelta.theta;
+                this.spherical.phi += this.sphericalDelta.phi;
+                
+                this.spherical.phi = Math.max(0.01, Math.min(Math.PI - 0.01, this.spherical.phi));
+                
+                offset.setFromSpherical(this.spherical);
+                
+                this.camera.position.copy(this.target).add(offset);
+                this.camera.lookAt(this.target);
+                
+                if (this.enableDamping) {
+                    this.sphericalDelta.theta *= (1 - this.dampingFactor);
+                    this.sphericalDelta.phi *= (1 - this.dampingFactor);
+                } else {
+                    this.sphericalDelta.set(0, 0, 0);
+                }
+            }
+        }
+
+        class Game3D2048 {
+            constructor() {
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                this.renderer = new THREE.WebGLRenderer({
+                    canvas: document.getElementById('gameCanvas'),
+                    antialias: true
+                });
+                
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setClearColor(0xE0F7FA);
+                
+                this.gridSize = 3;
+                this.score = 0;
+                
+                // 初始化数组
+                this.cubes = Array(this.gridSize).fill(null)
+                    .map(() => Array(this.gridSize).fill(null)
+                        .map(() => Array(this.gridSize).fill(0)));
+                
+                this.cubeObjects = Array(this.gridSize).fill(null)
+                    .map(() => Array(this.gridSize).fill(null)
+                        .map(() => Array(this.gridSize).fill(null)));
+                
+                this.camera.position.set(6, 6, 6);
+                this.camera.lookAt(0, 0, 0);
+                
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(10, 20, 10);
+                
+                const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.5);
+                directionalLight2.position.set(-10, -10, -10);
+                
+                this.scene.add(ambientLight);
+                this.scene.add(directionalLight);
+                this.scene.add(directionalLight2);
+                
+                this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+                
+                this.createGrid();
+                this.addRandomNumber();
+                this.addRandomNumber();
+                
+                // 创建方向指示箭头
+                this.createDirectionArrow();
+                
+                document.addEventListener('keydown', this.handleKeyPress.bind(this));
+                window.addEventListener('resize', this.onWindowResize.bind(this));
+                
+                // 使用新的音效
+                this.mergeSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3');  // 方块合并音效
+                this.resetSound = new Audio('https://assets.mixkit.co/active_storage/sfx/1115/1115-preview.mp3');   // 更短的重置音效（不到1秒）
+                
+                // 预加载音效
+                this.mergeSound.load();
+                this.resetSound.load();
+                
+                // 调整音量
+                this.mergeSound.volume = 0.2;
+                this.resetSound.volume = 0.2;
+                
+                // 添加重新开始按钮的事件监听
+                document.getElementById('restartButton').addEventListener('click', () => {
+                    this.resetGame();
+                });
+                
+                // 更换背景音乐为更轻快的音乐
+                this.bgMusic = new Audio('https://assets.mixkit.co/active_storage/sfx/2392/2392-preview.mp3');
+                this.bgMusic.loop = true;
+                this.bgMusic.volume = 0.08;  // 调低音量
+                
+                // 当音乐播放结束时自动重新开始
+                this.bgMusic.addEventListener('ended', () => {
+                    this.bgMusic.currentTime = 0;
+                    this.bgMusic.play();
+                });
+                
+                // 游戏状态
+                this.isPaused = false;
+                this.isMusicOn = true;
+                
+                // 绑定控制按钮
+                this.initializeControls();
+                
+                this.animate();
+            }
+
+            onWindowResize() {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+
+            createGrid() {
+                const spacing = 1.2;
+                const gridGeometry = new THREE.BoxGeometry(1, 1, 1);
+                const gridMaterial = new THREE.MeshPhongMaterial({
+                    color: 0xBBDEFB,
+                    transparent: true,
+                    opacity: 0.2
+                });
+                
+                for(let x = 0; x < this.gridSize; x++) {
+                    for(let y = 0; y < this.gridSize; y++) {
+                        for(let z = 0; z < this.gridSize; z++) {
+                            const cube = new THREE.Mesh(gridGeometry, gridMaterial);
+                            cube.position.set(
+                                (x - this.gridSize/2 + 0.5) * spacing,
+                                (y - this.gridSize/2 + 0.5) * spacing,
+                                (z - this.gridSize/2 + 0.5) * spacing
+                            );
+                            this.scene.add(cube);
+                        }
+                    }
+                }
+            }
+
+            addRandomNumber() {
+                const available = [];
+                for(let x = 0; x < this.gridSize; x++) {
+                    for(let y = 0; y < this.gridSize; y++) {
+                        for(let z = 0; z < this.gridSize; z++) {
+                            if(this.cubes[x][y][z] === 0) {
+                                available.push({x, y, z});
+                            }
+                        }
+                    }
+                }
+                
+                if(available.length > 0) {
+                    const pos = available[Math.floor(Math.random() * available.length)];
+                    const value = Math.random() < 0.9 ? 2 : 4;
+                    this.cubes[pos.x][pos.y][pos.z] = value;
+                    this.updateCube(pos.x, pos.y, pos.z, value, true);
+                }
+            }
+
+            updateCube(x, y, z, value, isNew = false) {
+                if (this.cubeObjects[x][y][z]) {
+                    this.scene.remove(this.cubeObjects[x][y][z]);
+                }
+
+                const spacing = 1.2;
+                const group = new THREE.Group();
+                
+                const cubeGeometry = new THREE.BoxGeometry(0.9, 0.9, 0.9);
+                const color = this.getColorForNumber(value);
+                const cubeMaterial = new THREE.MeshPhongMaterial({
+                    color: color,
+                    transparent: false,
+                    shininess: 50,
+                    specular: 0x444444,
+                    emissive: color,
+                    emissiveIntensity: 0.3  // 增加自发光强度
+                });
+                const cube = new THREE.Mesh(cubeGeometry, cubeMaterial);
+                group.add(cube);
+
+                group.position.set(
+                    (x - this.gridSize/2 + 0.5) * spacing,
+                    (y - this.gridSize/2 + 0.5) * spacing,
+                    (z - this.gridSize/2 + 0.5) * spacing
+                );
+
+                if (isNew) {
+                    group.scale.set(0.1, 0.1, 0.1);
+                    this.animateScale(group, 1);
+                }
+
+                this.scene.add(group);
+                this.cubeObjects[x][y][z] = group;
+                return group;
+            }
+
+            createNumberPoints(number) {
+                const canvas = document.createElement('canvas');
+                canvas.width = 64;
+                canvas.height = 64;
+                const ctx = canvas.getContext('2d');
+
+                // 清空画布
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                // 绘制数字
+                ctx.fillStyle = '#000000';
+                const fontSize = number.toString().length > 2 ? 36 : 48;
+                ctx.font = `bold ${fontSize}px Arial`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(number.toString(), canvas.width/2, canvas.height/2);
+
+                // 创建点云几何体
+                const geometry = new THREE.BufferGeometry();
+                const positions = [];
+
+                // 从canvas中采样点
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const data = imageData.data;
+                const step = 1; // 每个像素都采样
+                
+                for (let y = 0; y < canvas.height; y += step) {
+                    for (let x = 0; x < canvas.width; x += step) {
+                        const alpha = data[(y * canvas.width + x) * 4];
+                        if (alpha < 128) { // 采样黑色像素
+                            const xPos = (x - canvas.width/2) / (canvas.width/2) * 0.5;
+                            const yPos = (canvas.height/2 - y) / (canvas.height/2) * 0.5;
+                            positions.push(xPos, yPos, 0);
+                        }
+                    }
+                }
+
+                geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+                return geometry;
+            }
+
+            getColorForNumber(number) {
+                // 只使用10个数字阶段，移除3
+                const numbers = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024];
+                const index = numbers.indexOf(number);
+                
+                if (index === -1) return 0x888888; // 未知数字使用灰色
+                
+                // 重新定义10个颜色，提前所有颜色，最后加入紫色
+                const colors = [
+                    0x90FF90,    // 非常浅的绿色 (2)
+                    0x00FF00,    // 亮绿色 (4)
+                    0xFFFF00,    // 黄色 (8)
+                    0xFFC000,    // 橙黄色 (16)
+                    0xFF8000,    // 橙色 (32)
+                    0xFF4000,    // 深橙色 (64)
+                    0xFF0000,    // 红色 (128)
+                    0xC00000,    // 深红色 (256)
+                    0x800000,    // 暗红色 (512)
+                    0x800080     // 紫色 (1024)
+                ];
+                
+                return colors[index];
+            }
+
+            handleKeyPress(event) {
+                if (this.gameOver || this.isPaused) return;
+                
+                let moved = false;
+                console.log('Key pressed:', event.key.toLowerCase());
+                
+                switch(event.key.toLowerCase()) {
+                    case 'arrowleft':
+                    case 'a':
+                        moved = this.move('right');
+                        break;
+                    case 'arrowright':
+                    case 'd':
+                        moved = this.move('left');
+                        break;
+                    case 'arrowup':
+                    case 'w':
+                        moved = this.move('up');
+                        break;
+                    case 'arrowdown':
+                    case 's':
+                        moved = this.move('down');
+                        break;
+                    case 'z':
+                        moved = this.move('forward');
+                        break;
+                    case 'x':
+                        moved = this.move('backward');
+                        break;
+                    case 'r':
+                        this.resetGame();
+                        return;
+                }
+
+                if (moved) {
+                    if (this.mergeSound) {
+                        this.mergeSound.play().catch(e => console.log('Merge sound play failed:', e));
+                    }
+                    this.addRandomNumber();
+                    if (!this.canMove()) {
+                        this.gameOver = true;
+                        this.showGameOver();
+                    }
+                }
+            }
+
+            move(direction) {
+                let moved = false;
+                const size = this.gridSize;
+                const animations = [];
+                
+                // 确定遍历顺序
+                const iterations = {
+                    'left':     { x: [0, size], y: [0, size], z: [0, size] },
+                    'right':    { x: [size-1, -1], y: [0, size], z: [0, size] },
+                    'up':       { y: [size-1, -1], x: [0, size], z: [0, size] },
+                    'down':     { y: [0, size], x: [0, size], z: [0, size] },
+                    'forward':  { z: [0, size], x: [0, size], y: [0, size] },
+                    'backward': { z: [size-1, -1], x: [0, size], y: [0, size] }
+                }[direction];
+
+                // 确保 iterations 存在
+                if (!iterations) {
+                    console.error('Invalid direction:', direction);
+                    return false;
+                }
+
+                for (let y = iterations.y[0]; y != iterations.y[1]; y += iterations.y[1] > iterations.y[0] ? 1 : -1) {
+                    for (let x = iterations.x[0]; x != iterations.x[1]; x += iterations.x[1] > iterations.x[0] ? 1 : -1) {
+                        for (let z = iterations.z[0]; z != iterations.z[1]; z += iterations.z[1] > iterations.z[0] ? 1 : -1) {
+                            if (this.cubes[x][y][z] !== 0) {
+                                const newPos = this.findTargetPosition(x, y, z, direction);
+                                if (newPos.merged || newPos.x !== x || newPos.y !== y || newPos.z !== z) {
+                                    const value = this.cubes[x][y][z];
+                                    const oldCube = this.cubeObjects[x][y][z];
+                                    
+                                    // 清除原位置
+                                    this.cubes[x][y][z] = 0;
+                                    
+                                    if (newPos.merged) {
+                                        // 合并动画
+                                        const targetValue = value * 2;
+                                        this.score += targetValue;
+                                        this.cubes[newPos.x][newPos.y][newPos.z] = targetValue;
+                                        
+                                        animations.push(new Promise(resolve => {
+                                            this.animateScale(oldCube, 0.1, () => {
+                                                this.scene.remove(oldCube);
+                                                const newCube = this.updateCube(newPos.x, newPos.y, newPos.z, targetValue, true);
+                                                this.animateScale(newCube, 1.2, () => {
+                                                    this.animateScale(newCube, 1, resolve);
+                                                });
+                                            });
+                                        }));
+                                    } else {
+                                        // 移动动画
+                                        this.cubes[newPos.x][newPos.y][newPos.z] = value;
+                                        if (oldCube) {
+                                            const spacing = 1.2;
+                                            const targetPos = new THREE.Vector3(
+                                                (newPos.x - this.gridSize/2 + 0.5) * spacing,
+                                                (newPos.y - this.gridSize/2 + 0.5) * spacing,
+                                                (newPos.z - this.gridSize/2 + 0.5) * spacing
+                                            );
+                                            animations.push(this.animateMove(oldCube, targetPos));
+                                            this.cubeObjects[newPos.x][newPos.y][newPos.z] = oldCube;
+                                        }
+                                    }
+                                    this.cubeObjects[x][y][z] = null;
+                                    moved = true;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 等待所有动画完成后再添加新数字
+                if (animations.length > 0) {
+                    Promise.all(animations).then(() => {
+                        this.addRandomNumber();
+                        this.updateScore();
+                    });
+                } else if (moved) {
+                    this.addRandomNumber();
+                    this.updateScore();
+                }
+
+                return moved;
+            }
+
+            findTargetPosition(x, y, z, direction) {
+                let newX = x, newY = y, newZ = z;
+                let merged = false;
+                const value = this.cubes[x][y][z];
+
+                while (true) {
+                    let nextX = newX, nextY = newY, nextZ = newZ;
+                    
+                    switch(direction) {
+                        case 'left': nextX--; break;
+                        case 'right': nextX++; break;
+                        case 'up': nextY++; break;
+                        case 'down': nextY--; break;
+                        case 'forward': nextZ--; break;
+                        case 'backward': nextZ++; break;
+                        default:
+                            console.error('Invalid direction in findTargetPosition:', direction);
+                            return {x: newX, y: newY, z: newZ, merged: false};
+                    }
+
+                    if (!this.isValidPosition(nextX, nextY, nextZ)) break;
+                    
+                    if (this.cubes[nextX][nextY][nextZ] === 0) {
+                        newX = nextX;
+                        newY = nextY;
+                        newZ = nextZ;
+                    } else if (this.cubes[nextX][nextY][nextZ] === value && !merged) {
+                        newX = nextX;
+                        newY = nextY;
+                        newZ = nextZ;
+                        merged = true;
+                        break;
+                    } else {
+                        break;
+                    }
+                }
+
+                return {x: newX, y: newY, z: newZ, merged};
+            }
+
+            isValidPosition(x, y, z) {
+                return x >= 0 && x < this.gridSize && 
+                       y >= 0 && y < this.gridSize && 
+                       z >= 0 && z < this.gridSize;
+            }
+
+            updateDisplay() {
+                for(let x = 0; x < this.gridSize; x++) {
+                    for(let y = 0; y < this.gridSize; y++) {
+                        for(let z = 0; z < this.gridSize; z++) {
+                            if(this.cubeObjects[x][y][z]) {
+                                this.scene.remove(this.cubeObjects[x][y][z]);
+                                this.cubeObjects[x][y][z] = null;
+                            }
+                            if(this.cubes[x][y][z] !== 0) {
+                                this.updateCube(x, y, z, this.cubes[x][y][z]);
+                            }
+                        }
+                    }
+                }
+            }
+
+            updateScore() {
+                document.getElementById('score').textContent = `分数: ${this.score}`;
+            }
+
+            animate() {
+                requestAnimationFrame(() => this.animate());
+                this.controls.update();
+                this.renderer.render(this.scene, this.camera);
+            }
+
+            animateScale(object, targetScale, onComplete) {
+                const startScale = object.scale.x;
+                const duration = 200; // 动画持续时间（毫秒）
+                const startTime = Date.now();
+
+                const animate = () => {
+                    const currentTime = Date.now();
+                    const elapsed = currentTime - startTime;
+                    const progress = Math.min(elapsed / duration, 1);
+
+                    // 使用缓动函数使动画更平滑
+                    const eased = this.easeOutBack(progress);
+                    const currentScale = startScale + (targetScale - startScale) * eased;
+                    object.scale.set(currentScale, currentScale, currentScale);
+
+                    if (progress < 1) {
+                        requestAnimationFrame(animate);
+                    } else if (onComplete) {
+                        onComplete();
+                    }
+                };
+
+                animate();
+            }
+
+            easeOutBack(x) {
+                const c1 = 1.70158;
+                const c3 = c1 + 1;
+                return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
+            }
+
+            // 添加移动动画方法
+            animateMove(object, targetPos) {
+                return new Promise(resolve => {
+                    const startPos = object.position.clone();
+                    const duration = 200;
+                    const startTime = Date.now();
+
+                    const animate = () => {
+                        const currentTime = Date.now();
+                        const elapsed = currentTime - startTime;
+                        const progress = Math.min(elapsed / duration, 1);
+
+                        const eased = this.easeOutQuad(progress);
+                        object.position.lerpVectors(startPos, targetPos, eased);
+
+                        if (progress < 1) {
+                            requestAnimationFrame(animate);
+                        } else {
+                            resolve();
+                        }
+                    };
+
+                    animate();
+                });
+            }
+
+            // 添加缓动函数
+            easeOutQuad(x) {
+                return 1 - (1 - x) * (1 - x);
+            }
+
+            resetGame() {
+                // 隐藏弹窗
+                const modal = document.getElementById('gameOverModal');
+                const overlay = document.getElementById('modalOverlay');
+                modal.style.display = 'none';
+                overlay.style.display = 'none';
+                
+                // 播放重置音效
+                if (this.resetSound) {
+                    this.resetSound.play().catch(e => console.log('Reset sound play failed:', e));
+                }
+                
+                // 清除所有现有方块
+                for(let x = 0; x < this.gridSize; x++) {
+                    for(let y = 0; y < this.gridSize; y++) {
+                        for(let z = 0; z < this.gridSize; z++) {
+                            if(this.cubeObjects[x][y][z]) {
+                                this.scene.remove(this.cubeObjects[x][y][z]);
+                                this.cubeObjects[x][y][z] = null;
+                            }
+                            this.cubes[x][y][z] = 0;
+                        }
+                    }
+                }
+                
+                // 重置分数
+                this.score = 0;
+                this.updateScore();
+                
+                // 重置游戏状态
+                this.gameOver = false;
+                
+                // 重置暂停状态
+                this.isPaused = false;
+                document.getElementById('pauseButton').textContent = '⏸️ 暂停';
+                document.getElementById('pauseButton').classList.remove('active');
+                
+                // 添加两个初始方块
+                this.addRandomNumber();
+                this.addRandomNumber();
+            }
+
+            // 添加创建方向指示箭头的方法
+            createDirectionArrow() {
+                const arrowGroup = new THREE.Group();
+                
+                // 保持相同的箭头尺寸
+                const bodyGeometry = new THREE.BoxGeometry(0.15, 0.4, 0.15);
+                const bodyMaterial = new THREE.MeshPhongMaterial({ 
+                    color: 0xFF0000,
+                    shininess: 50,
+                    specular: 0x444444
+                });
+                const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+                body.position.y = 0.2;
+                
+                const headGeometry = new THREE.ConeGeometry(0.2, 0.3, 4);
+                const headMaterial = new THREE.MeshPhongMaterial({ 
+                    color: 0xFF0000,
+                    shininess: 50,
+                    specular: 0x444444
+                });
+                const head = new THREE.Mesh(headGeometry, headMaterial);
+                head.position.y = 0.55;
+                head.rotation.y = Math.PI / 4;
+                
+                arrowGroup.add(body);
+                arrowGroup.add(head);
+                
+                // 调整箭头位置和方向，使其指向反方向（Z轴正方向）
+                arrowGroup.position.set(0, 2.8, 0);
+                arrowGroup.rotation.x = -Math.PI / 2;  // 反转箭头方向
+                
+                this.scene.add(arrowGroup);
+                this.arrow = arrowGroup;
+            }
+
+            canMove() {
+                // 检查是否还有空格
+                for(let x = 0; x < this.gridSize; x++) {
+                    for(let y = 0; y < this.gridSize; y++) {
+                        for(let z = 0; z < this.gridSize; z++) {
+                            if(this.cubes[x][y][z] === 0) return true;
+                            
+                            // 检查每个方向是否可以合并
+                            if (x < this.gridSize - 1 && this.cubes[x][y][z] === this.cubes[x + 1][y][z]) return true;
+                            if (y < this.gridSize - 1 && this.cubes[x][y][z] === this.cubes[x][y + 1][z]) return true;
+                            if (z < this.gridSize - 1 && this.cubes[x][y][z] === this.cubes[x][y][z + 1]) return true;
+                        }
+                    }
+                }
+                return false;
+            }
+
+            showGameOver() {
+                const modal = document.getElementById('gameOverModal');
+                const overlay = document.getElementById('modalOverlay');
+                const finalScore = document.getElementById('finalScore');
+                
+                finalScore.textContent = this.score;
+                modal.style.display = 'block';
+                overlay.style.display = 'block';
+            }
+
+            initializeControls() {
+                const pauseButton = document.getElementById('pauseButton');
+                const musicButton = document.getElementById('musicButton');
+                
+                pauseButton.addEventListener('click', () => {
+                    this.togglePause();
+                });
+                
+                musicButton.addEventListener('click', () => {
+                    this.toggleMusic();
+                });
+                
+                // 开始播放背景音乐
+                this.bgMusic.play().catch(e => console.log('Music play failed:', e));
+            }
+            
+            togglePause() {
+                this.isPaused = !this.isPaused;
+                const pauseButton = document.getElementById('pauseButton');
+                
+                if (this.isPaused) {
+                    pauseButton.textContent = '▶️ 继续';
+                    pauseButton.classList.add('active');
+                } else {
+                    pauseButton.textContent = '⏸️ 暂停';
+                    pauseButton.classList.remove('active');
+                }
+            }
+            
+            toggleMusic() {
+                this.isMusicOn = !this.isMusicOn;
+                const musicButton = document.getElementById('musicButton');
+                
+                if (this.isMusicOn) {
+                    this.bgMusic.play();
+                    musicButton.textContent = '🎵 音乐开';
+                    musicButton.classList.remove('active');
+                } else {
+                    this.bgMusic.pause();
+                    musicButton.textContent = '🔇 音乐关';
+                    musicButton.classList.add('active');
+                }
+            }
+        }
+
+        window.onload = () => {
+            const game = new Game3D2048();
+        }
+    </script>
+</body>
+</html>
