@@ -797,34 +797,15 @@
                     this.resetSound.play().catch(e => console.log('Reset sound play failed:', e));
                 }
                 
-                // 清除所有现有方块
-                for(let x = 0; x < this.gridSize; x++) {
-                    for(let y = 0; y < this.gridSize; y++) {
-                        for(let z = 0; z < this.gridSize; z++) {
-                            if(this.cubeObjects[x][y][z]) {
-                                this.scene.remove(this.cubeObjects[x][y][z]);
-                                this.cubeObjects[x][y][z] = null;
-                            }
-                            this.cubes[x][y][z] = 0;
-                        }
-                    }
+                // 销毁当前游戏实例
+                this.scene.clear();
+                this.renderer.dispose();
+                if (this.controls) {
+                    this.controls.enabled = false;
                 }
                 
-                // 重置分数
-                this.score = 0;
-                this.updateScore();
-                
-                // 重置游戏状态
-                this.gameOver = false;
-                
-                // 重置暂停状态
-                this.isPaused = false;
-                document.getElementById('pauseButton').textContent = '⏸️ 暂停';
-                document.getElementById('pauseButton').classList.remove('active');
-                
-                // 添加两个初始方块
-                this.addRandomNumber();
-                this.addRandomNumber();
+                // 创建新的游戏实例
+                const game = new Game3D2048();
             }
 
             // 添加创建方向指示箭头的方法
