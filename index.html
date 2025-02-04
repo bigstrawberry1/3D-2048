@@ -22,6 +22,8 @@
             background: rgba(255,255,255,0.8);
             padding: 10px;
             border-radius: 5px;
+            text-align: right;
+            line-height: 1.4;
         }
         #instructions {
             position: fixed;
@@ -112,6 +114,11 @@
         .control-button.active {
             background: #4CAF50;
             color: white;
+        }
+        
+        #gameOverModal p {
+            margin: 15px 0;
+            line-height: 1.5;
         }
     </style>
 </head>
@@ -294,6 +301,8 @@
                 
                 this.gridSize = 3;
                 this.score = 0;
+                // 从 localStorage 读取最高分
+                this.highScore = parseInt(localStorage.getItem('highScore')) || 0;
                 
                 // 初始化数组
                 this.cubes = Array(this.gridSize).fill(null)
@@ -364,6 +373,9 @@
                 
                 // 绑定控制按钮
                 this.initializeControls();
+                
+                // 更新初始分数显示
+                this.updateScore();
                 
                 this.animate();
             }
@@ -582,7 +594,6 @@
                     'backward': { z: [size-1, -1], x: [0, size], y: [0, size] }
                 }[direction];
 
-                // 确保 iterations 存在
                 if (!iterations) {
                     console.error('Invalid direction:', direction);
                     return false;
@@ -599,21 +610,36 @@
                                     
                                     // 清除原位置
                                     this.cubes[x][y][z] = 0;
+                                    this.cubeObjects[x][y][z] = null;
                                     
                                     if (newPos.merged) {
                                         // 合并动画
                                         const targetValue = value * 2;
                                         this.score += targetValue;
+                                        // 实时更新最高分
+                                        if (this.score > this.highScore) {
+                                            this.highScore = this.score;
+                                            localStorage.setItem('highScore', this.highScore);
+                                        }
+                                        
+                                        // 清除目标位置的旧方块
+                                        if (this.cubeObjects[newPos.x][newPos.y][newPos.z]) {
+                                            this.scene.remove(this.cubeObjects[newPos.x][newPos.y][newPos.z]);
+                                            this.cubeObjects[newPos.x][newPos.y][newPos.z] = null;
+                                        }
+                                        
                                         this.cubes[newPos.x][newPos.y][newPos.z] = targetValue;
                                         
                                         animations.push(new Promise(resolve => {
-                                            this.animateScale(oldCube, 0.1, () => {
-                                                this.scene.remove(oldCube);
-                                                const newCube = this.updateCube(newPos.x, newPos.y, newPos.z, targetValue, true);
-                                                this.animateScale(newCube, 1.2, () => {
-                                                    this.animateScale(newCube, 1, resolve);
+                                            if (oldCube) {
+                                                this.animateScale(oldCube, 0.1, () => {
+                                                    this.scene.remove(oldCube);
+                                                    const newCube = this.updateCube(newPos.x, newPos.y, newPos.z, targetValue, true);
+                                                    this.animateScale(newCube, 1.2, () => {
+                                                        this.animateScale(newCube, 1, resolve);
+                                                    });
                                                 });
-                                            });
+                                            }
                                         }));
                                     } else {
                                         // 移动动画
@@ -629,7 +655,6 @@
                                             this.cubeObjects[newPos.x][newPos.y][newPos.z] = oldCube;
                                         }
                                     }
-                                    this.cubeObjects[x][y][z] = null;
                                     moved = true;
                                 }
                             }
@@ -671,21 +696,28 @@
                             return {x: newX, y: newY, z: newZ, merged: false};
                     }
 
+                    // 检查是否超出边界
                     if (!this.isValidPosition(nextX, nextY, nextZ)) break;
                     
+                    // 如果下一个位置是空的，继续移动
                     if (this.cubes[nextX][nextY][nextZ] === 0) {
                         newX = nextX;
                         newY = nextY;
                         newZ = nextZ;
-                    } else if (this.cubes[nextX][nextY][nextZ] === value && !merged) {
+                        continue;
+                    }
+                    
+                    // 如果下一个位置的数字相同，则合并
+                    if (this.cubes[nextX][nextY][nextZ] === value && !merged) {
                         newX = nextX;
                         newY = nextY;
                         newZ = nextZ;
                         merged = true;
                         break;
-                    } else {
-                        break;
                     }
+                    
+                    // 如果遇到不同的数字，停止移动
+                    break;
                 }
 
                 return {x: newX, y: newY, z: newZ, merged};
@@ -714,7 +746,7 @@
             }
 
             updateScore() {
-                document.getElementById('score').textContent = `分数: ${this.score}`;
+                document.getElementById('score').innerHTML = `分数: ${this.score}<br>最高分: ${this.highScore}`;
             }
 
             animate() {
@@ -796,16 +828,55 @@
                 if (this.resetSound) {
                     this.resetSound.play().catch(e => console.log('Reset sound play failed:', e));
                 }
+
+                // 重置游戏状态
+                this.gameOver = false;
+                this.score = 0;
+                this.updateScore();
                 
-                // 销毁当前游戏实例
-                this.scene.clear();
-                this.renderer.dispose();
-                if (this.controls) {
-                    this.controls.enabled = false;
-                }
+                // 清除场景
+                this.scene = new THREE.Scene();
+                this.renderer.setClearColor(0xE0F7FA);
                 
-                // 创建新的游戏实例
-                const game = new Game3D2048();
+                // 重新添加灯光
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(10, 20, 10);
+                
+                const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.5);
+                directionalLight2.position.set(-10, -10, -10);
+                
+                this.scene.add(ambientLight);
+                this.scene.add(directionalLight);
+                this.scene.add(directionalLight2);
+                
+                // 重置数组
+                this.cubes = Array(this.gridSize).fill(null)
+                    .map(() => Array(this.gridSize).fill(null)
+                        .map(() => Array(this.gridSize).fill(0)));
+                
+                this.cubeObjects = Array(this.gridSize).fill(null)
+                    .map(() => Array(this.gridSize).fill(null)
+                        .map(() => Array(this.gridSize).fill(null)));
+                
+                // 重置相机位置
+                this.camera.position.set(6, 6, 6);
+                this.camera.lookAt(0, 0, 0);
+                
+                // 重新创建网格
+                this.createGrid();
+                
+                // 重新创建箭头
+                this.createDirectionArrow();
+                
+                // 重置暂停状态
+                this.isPaused = false;
+                document.getElementById('pauseButton').textContent = '⏸️ 暂停';
+                document.getElementById('pauseButton').classList.remove('active');
+                
+                // 重新创建初始方块
+                this.addRandomNumber();
+                this.addRandomNumber();
             }
 
             // 添加创建方向指示箭头的方法
@@ -850,10 +921,21 @@
                         for(let z = 0; z < this.gridSize; z++) {
                             if(this.cubes[x][y][z] === 0) return true;
                             
-                            // 检查每个方向是否可以合并
-                            if (x < this.gridSize - 1 && this.cubes[x][y][z] === this.cubes[x + 1][y][z]) return true;
-                            if (y < this.gridSize - 1 && this.cubes[x][y][z] === this.cubes[x][y + 1][z]) return true;
-                            if (z < this.gridSize - 1 && this.cubes[x][y][z] === this.cubes[x][y][z + 1]) return true;
+                            const value = this.cubes[x][y][z];
+                            
+                            // 检查所有六个方向是否可以合并
+                            // 右
+                            if (x < this.gridSize - 1 && this.cubes[x + 1][y][z] === value) return true;
+                            // 左
+                            if (x > 0 && this.cubes[x - 1][y][z] === value) return true;
+                            // 上
+                            if (y < this.gridSize - 1 && this.cubes[x][y + 1][z] === value) return true;
+                            // 下
+                            if (y > 0 && this.cubes[x][y - 1][z] === value) return true;
+                            // 前
+                            if (z < this.gridSize - 1 && this.cubes[x][y][z + 1] === value) return true;
+                            // 后
+                            if (z > 0 && this.cubes[x][y][z - 1] === value) return true;
                         }
                     }
                 }
@@ -865,7 +947,12 @@
                 const overlay = document.getElementById('modalOverlay');
                 const finalScore = document.getElementById('finalScore');
                 
-                finalScore.textContent = this.score;
+                if (this.score >= this.highScore) {
+                    finalScore.innerHTML = `${this.score}<br><span style="color: #4CAF50; font-size: 0.9em;">新纪录！</span>`;
+                } else {
+                    finalScore.innerHTML = `${this.score}<br><span style="color: #666; font-size: 0.9em;">最高分: ${this.highScore}</span>`;
+                }
+                
                 modal.style.display = 'block';
                 overlay.style.display = 'block';
             }
